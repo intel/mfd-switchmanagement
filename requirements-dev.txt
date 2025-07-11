@@ -1,0 +1,2 @@
+-r requirements-test.txt
+mfd-code-quality >= 1.2.0, < 2
