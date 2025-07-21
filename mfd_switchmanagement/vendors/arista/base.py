@@ -2,13 +2,18 @@
 # SPDX-License-Identifier: MIT
 """Module for Arista base."""
 
+import logging
 import re
 from enum import Enum
 from typing import Any, Iterable
+from mfd_common_libs import add_logging_level, log_levels
 
 from ...base import Switch
 from ...utils.match import any_match
 from ...exceptions import SwitchException
+
+logger = logging.getLogger(__name__)
+add_logging_level("MODULE_DEBUG", log_levels.MODULE_DEBUG)
 
 
 class FecMode(Enum):
@@ -433,4 +438,163 @@ class Arista(Switch):
         elif "linkup" in output.lower():
             return True
         else:
-            raise SwitchException(f"Link status parsing error on: {self.__class__.__name__}; interface: {port})")
+            raise SwitchException(f"Link status parsing error on: {self.__class__.__name__}; interface: {port}")
+
+    def configure_dcbx_ets_traffic_class(self, class_bandwidth: dict[int, int], *, disable: bool = False) -> None:
+        """
+        Configure DCBX ETS traffic class settings on the switch.
+
+        :param class_bandwidth: Dictionary mapping traffic class (1-8) to bandwidth percentage (0-100)
+        :param disable: If True, disables the ETS traffic class configuration
+        """
+        logger.log(level=log_levels.MODULE_DEBUG, msg=f"Configuring DCBX ETS traffic class: {class_bandwidth}")
+        commands = []
+        for traffic_class, bandwidth in class_bandwidth.items():
+            if traffic_class not in range(1, 9):
+                raise ValueError("Traffic class must be between 1 and 8.")
+            if bandwidth not in range(0, 101):
+                raise ValueError("Bandwidth must be between 0 and 100.")
+            commands.append(f"{'no ' if disable else ''}dcbx ets traffic-class {traffic_class} bandwidth {bandwidth}")
+        self._connection.send_configuration(commands)
+
+    def configure_dcbx_qos_map(self, cos_to_tc_map: dict[int, int], disable: bool = False) -> None:
+        """
+        Configure DCBX QoS map settings on the switch.
+
+        :param cos_to_tc_map: Dictionary mapping CoS (0-7) to traffic class (1-8)
+        :param disable: If True, disables the QoS map configuration
+        """
+        logger.log(level=log_levels.MODULE_DEBUG, msg=f"Configuring DCBX QoS map: {cos_to_tc_map}")
+        commands = []
+        for cos, traffic_class in cos_to_tc_map.items():
+            if cos not in range(0, 8):
+                raise ValueError("CoS must be between 0 and 7.")
+            if traffic_class not in range(1, 9):
+                raise ValueError("Traffic class must be between 1 and 8.")
+            commands.append(f"{'no ' if disable else ''}dcbx ets qos map cos {cos} traffic-class {traffic_class}")
+        self._connection.send_configuration(commands)
+
+    def configure_dcbx(
+        self, cos_to_tc_map: dict[int, int] | None = None, class_bandwidth: dict[int, int] | None = None
+    ) -> None:
+        """
+        Configure DCBX settings on the switch.
+
+        :param cos_to_tc_map: Dictionary mapping CoS (0-7) to traffic class (1-8), defaults to {3: 1}
+        :param class_bandwidth: Dictionary mapping traffic class (1-8) to bandwidth percentage (0-100)
+            defaults to {1: 100}
+        """
+        if cos_to_tc_map is None:
+            cos_to_tc_map = {3: 1}
+        if class_bandwidth is None:
+            class_bandwidth = {1: 100}
+        self.configure_dcbx_qos_map(cos_to_tc_map)
+        self.configure_dcbx_ets_traffic_class(class_bandwidth)
+
+    def configure_lldp(self, port: str) -> None:
+        """
+        Configure LLDP settings on the interface.
+
+        :param port: port of switch
+        """
+        logger.log(level=log_levels.MODULE_DEBUG, msg=f"Configuring LLDP on port: {port}")
+        self._validate_port_and_port_channel_syntax(ethernet_port=port)
+        commands = [
+            f"interface {port}",
+            "lldp transmit",
+            "lldp receive",
+        ]
+        self._connection.send_configuration(commands)
+
+    def configure_trunking(self, port: str) -> None:
+        """
+        Configure trunking settings on the interface.
+
+        :param port: port of switch
+        """
+        logger.log(level=log_levels.MODULE_DEBUG, msg=f"Configuring trunking on port: {port}")
+        self._validate_port_and_port_channel_syntax(ethernet_port=port)
+        commands = [
+            f"interface {port}",
+            "switchport mode trunk",
+            "switchport trunk allowed vlan all",
+        ]
+        self._connection.send_configuration(commands)
+
+    def configure_dcbx_mode(self, port: str, mode: str = "ieee") -> None:
+        """
+        Configure DCBX mode on the interface.
+
+        :param port: port of switch
+        :param mode: DCBX mode to set, default is "ieee"
+        """
+        logger.log(level=log_levels.MODULE_DEBUG, msg=f"Configuring DCBX mode on port: {port} to {mode}")
+        self._validate_port_and_port_channel_syntax(ethernet_port=port)
+        commands = [
+            f"interface {port}",
+            f"dcbx mode {mode.lower()}",
+        ]
+        self._connection.send_configuration(commands)
+
+    def disable_flowcontrol(self, port: str) -> None:
+        """
+        Disable flow control on the interface.
+
+        :param port: port of switch
+        """
+        logger.log(level=log_levels.MODULE_DEBUG, msg=f"Disabling flow control on port: {port}")
+        self._validate_port_and_port_channel_syntax(ethernet_port=port)
+        commands = [
+            f"interface {port}",
+            "flowcontrol send off",
+            "flowcontrol receive off",
+        ]
+        self._connection.send_configuration(commands)
+
+    def configure_priority_flow_control(self, port: str, priorities: list[int] | None = None) -> None:
+        """
+        Prepare priority flow control settings on the interface.
+
+        :param port: port of switch
+        :param priorities: list of priority levels to configure, defaults to [3, 0, 1, 2, 4, 5, 6]
+        """
+        logger.log(level=log_levels.MODULE_DEBUG, msg=f"Configuring PFC on port: {port} with priorities: {priorities}")
+        if priorities is None:
+            priorities = [3, 0, 1, 2, 4, 5, 6]
+        self._validate_port_and_port_channel_syntax(ethernet_port=port)
+        commands = [
+            f"interface {port}",
+            "priority-flow-control mode on",  # can be deprecated in future versions of switch
+            "priority-flow-control on",
+        ]
+        for priority in priorities:
+            commands.append(f"priority-flow-control priority {priority} no-drop")
+        self._connection.send_configuration(commands)
+
+    def configure_pfc_userspace(self, port: str) -> None:
+        """
+        Configure default Priority Flow Control (PFC) settings on the interface.
+
+        :param port: port of switch
+        """
+        self.configure_dcbx()
+        self.configure_lldp(port)
+        self.configure_trunking(port)
+        self.configure_dcbx_mode(port)
+        self.disable_flowcontrol(port)
+        self.configure_priority_flow_control(port)
+
+    def disable_pfc_userspace(self, port: str) -> None:
+        """
+        Disable Priority Flow Control (PFC) settings on the interface.
+
+        :param port: port of switch
+        """
+        logger.log(level=log_levels.MODULE_DEBUG, msg=f"Disabling PFC on port: {port}")
+        self._validate_port_and_port_channel_syntax(ethernet_port=port)
+        commands = [
+            f"default interface {port}",
+        ]
+        self._connection.send_configuration(commands)
+        self.configure_dcbx_ets_traffic_class(class_bandwidth={1: 100}, disable=True)
+        self.configure_dcbx_qos_map(cos_to_tc_map={3: 1}, disable=True)

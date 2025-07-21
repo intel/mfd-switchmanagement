@@ -91,7 +91,9 @@ class SSHSwitchConnection(BaseSwitchConnection):
 
     def _check_connection(self) -> Optional[bool]:
         """Check connection to switch."""
-        connection_status = self._connection.is_alive()
+        connection_status = (
+            self._connection.remote_conn.transport.is_alive()
+        )  # check if transport layer of channel of connection is active
         if connection_status:
             logger.log(level=log_levels.MODULE_DEBUG, msg="Connection established.")
             return connection_status
