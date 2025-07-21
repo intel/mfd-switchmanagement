@@ -5,7 +5,7 @@ from pytest import fixture, raises
 from textwrap import dedent
 
 from mfd_switchmanagement import Arista
-from mfd_switchmanagement.connections.base import BaseSwitchConnection
+from mfd_switchmanagement.connections.ssh import SSHSwitchConnection
 from mfd_switchmanagement.exceptions import SwitchException
 from mfd_switchmanagement.vendors.arista.base import FecMode
 
@@ -17,7 +17,7 @@ class TestArista:
     def switch(self, mocker) -> Arista:
         switch = Arista.__new__(Arista)
         switch.__init__ = mocker.create_autospec(switch.__init__, return_value=None)
-        switch._connection = mocker.create_autospec(BaseSwitchConnection)
+        switch._connection = mocker.create_autospec(SSHSwitchConnection)
         return switch
 
     def test_get_port_by_mac(self, switch, mocker):
@@ -336,3 +336,122 @@ class TestArista:
         switch._connection.send_command.return_value = unknown
         with pytest.raises(SwitchException, match="Link status parsing error on: Arista; interface: Et15/1"):
             switch.is_port_linkup(port="Et15/1")
+
+    def test_configure_dcbx(self, switch, mocker):
+        mocker.patch.object(switch, "configure_dcbx_qos_map")
+        mocker.patch.object(switch, "configure_dcbx_ets_traffic_class")
+
+        switch.configure_dcbx()
+
+        switch.configure_dcbx_qos_map.assert_called_once_with({3: 1})
+        switch.configure_dcbx_ets_traffic_class.assert_called_once_with({1: 100})
+
+    def test_configure_lldp(self, switch):
+        switch.configure_lldp("Et1/1")
+
+        switch._connection.send_configuration.assert_called_with(
+            [
+                "interface Et1/1",
+                "lldp transmit",
+                "lldp receive",
+            ]
+        )
+
+    def test_configure_trunking(self, switch):
+        switch.configure_trunking("Et1/1")
+        switch._connection.send_configuration.assert_called_with(
+            [
+                "interface Et1/1",
+                "switchport mode trunk",
+                "switchport trunk allowed vlan all",
+            ]
+        )
+
+    def test_configure_dcbx_mode(self, switch):
+        switch.configure_dcbx_mode("Et1/1")
+        switch._connection.send_configuration.assert_called_with(
+            [
+                "interface Et1/1",
+                "dcbx mode ieee",
+            ]
+        )
+
+    def test_disable_flowcontrol(self, switch):
+        switch.disable_flowcontrol("Et1/1")
+        switch._connection.send_configuration.assert_called_with(
+            [
+                "interface Et1/1",
+                "flowcontrol send off",
+                "flowcontrol receive off",
+            ]
+        )
+
+    def test_configure_priority_flow_control(self, switch):
+        switch.configure_priority_flow_control("Et1/1")
+        switch._connection.send_configuration.assert_called_with(
+            [
+                "interface Et1/1",
+                "priority-flow-control mode on",
+                "priority-flow-control on",
+                "priority-flow-control priority 3 no-drop",
+                "priority-flow-control priority 0 no-drop",
+                "priority-flow-control priority 1 no-drop",
+                "priority-flow-control priority 2 no-drop",
+                "priority-flow-control priority 4 no-drop",
+                "priority-flow-control priority 5 no-drop",
+                "priority-flow-control priority 6 no-drop",
+            ]
+        )
+
+    def test_configure_pfc(self, switch, mocker):
+        mocker.patch.object(switch, "configure_dcbx")
+        mocker.patch.object(switch, "configure_lldp")
+        mocker.patch.object(switch, "configure_trunking")
+        mocker.patch.object(switch, "configure_dcbx_mode")
+        mocker.patch.object(switch, "disable_flowcontrol")
+        mocker.patch.object(switch, "configure_priority_flow_control")
+
+        switch.configure_pfc_userspace("Et1/1")
+
+        switch.configure_dcbx.assert_called_once()
+        switch.configure_lldp.assert_called_once_with("Et1/1")
+        switch.configure_trunking.assert_called_once_with("Et1/1")
+        switch.configure_dcbx_mode.assert_called_once_with("Et1/1")
+        switch.disable_flowcontrol.assert_called_once_with("Et1/1")
+        switch.configure_priority_flow_control.assert_called_once_with("Et1/1")
+
+    def test_configure_dcbx_qos_map(self, switch, mocker):
+        switch._connection.send_configuration = mocker.Mock()
+        switch.configure_dcbx_qos_map({3: 1})
+        switch._connection.send_configuration.assert_called_once_with(
+            [
+                "dcbx ets qos map cos 3 traffic-class 1",
+            ]
+        )
+
+    def test_configure_dcbx_ets_traffic_class(self, switch, mocker):
+        switch._connection.send_configuration = mocker.Mock()
+        switch.configure_dcbx_ets_traffic_class({1: 100})
+        switch._connection.send_configuration.assert_called_once_with(
+            [
+                "dcbx ets traffic-class 1 bandwidth 100",
+            ]
+        )
+
+    def test_disable_pfc_userspace(self, switch, mocker):
+        port = "ethernet 1/1"
+
+        # Mock dependencies
+        switch._validate_port_and_port_channel_syntax = mocker.Mock()
+        switch._connection.send_configuration = mocker.Mock()
+        switch.configure_dcbx_ets_traffic_class = mocker.Mock()
+        switch.configure_dcbx_qos_map = mocker.Mock()
+
+        # Call the method
+        switch.disable_pfc_userspace(port)
+
+        # Assertions
+        switch._validate_port_and_port_channel_syntax.assert_called_once_with(ethernet_port=port)
+        switch._connection.send_configuration.assert_any_call([f"default interface {port}"])
+        switch.configure_dcbx_ets_traffic_class.assert_called_once_with(class_bandwidth={1: 100}, disable=True)
+        switch.configure_dcbx_qos_map.assert_called_once_with(cos_to_tc_map={3: 1}, disable=True)
