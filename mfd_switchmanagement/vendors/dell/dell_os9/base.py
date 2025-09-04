@@ -154,6 +154,34 @@ class DellOS9(Switch):
             ]
         )
 
+    def get_port_by_mac(self, mac: str) -> str:
+        """
+        Get port of switch with the specified MAC address.
+
+        :param mac: device MAC address in AA:BB:CC:DD:EE:FF form
+        :return: port name
+        :raises SwitchException: if port not found
+        :raises ValueError: if provided MAC address is incorrect
+        """
+        if self.is_mac_address(mac):
+            output = self._connection.send_command(f"show mac-address-table address {mac}")
+            # Example output from show mac-address-table command:
+            #
+            # GK6031-DR12-S6000-19505#show mac-address-table address 68:05:ca:c1:c8:ea
+            # Codes: *N - VLT Peer Synced MAC
+            # *I - Internal MAC Address used for Inter Process Communication
+            # VlanId     Mac Address           Type          Interface        State
+            #  1      aa:bb:cc:dd:ee:ff       Dynamic         Te 0/32         Active
+            pattern = r"\s+\d+\s+(?:[0-9a-f]{2}:){5}[0-9a-f]{2}\s+\w+\s+(?P<port>\S+\s+\S+)\s+\w+"
+            match = re.search(pattern, output, re.IGNORECASE)
+
+            if match:
+                return match.group("port")  # return the port name
+            else:
+                raise SwitchException(f"Could not find port for MAC address {mac}")
+        else:
+            raise ValueError(f"Incorrect MAC address: {mac}")
+
     def get_vlan_by_mac(self, mac: str) -> int:
         """
         Get VLAN of port with the specified MAC address.
