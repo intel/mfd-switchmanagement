@@ -1120,3 +1120,253 @@ class TestDellOS10:
         # Assert
         convert_port_name.assert_called_once_with(port)
         switch._connection.send_command_list.assert_called_once()
+
+    def test_create_qos_policy_userspace_default_suffix(self, switch, mocker):
+        """Test create_qos_policy_userspace with default suffix."""
+        # Arrange
+        switch._connection = mocker.Mock()
+        switch.create_qos_map = mocker.Mock()
+
+        # Act
+        switch.create_qos_policy_userspace()
+
+        # Assert
+        expected_commands = ["trust dot1p-map TM_100", "qos-group 3 dot1p 0,1,2,3,4,5,6,7", "exit"]
+        switch._connection.send_configuration.assert_called_once_with(expected_commands)
+        assert switch.create_qos_map.call_count == 2
+        switch.create_qos_map.assert_any_call(queues=[0], tc_name="QMU_100", queue_type="ucast")
+        switch.create_qos_map.assert_any_call(queues=[0], tc_name="QMU_100", queue_type="mcast")
+
+    def test_create_qos_policy_userspace_custom_suffix(self, switch, mocker):
+        """Test create_qos_policy_userspace with custom suffix."""
+        # Arrange
+        switch._connection = mocker.Mock()
+        switch.create_qos_map = mocker.Mock()
+        suffix = "200"
+
+        # Act
+        switch.create_qos_policy_userspace(suffix=suffix)
+
+        # Assert
+        expected_commands = ["trust dot1p-map TM_200", "qos-group 3 dot1p 0,1,2,3,4,5,6,7", "exit"]
+        switch._connection.send_configuration.assert_called_once_with(expected_commands)
+        switch.create_qos_map.assert_any_call(queues=[0], tc_name="QMU_200", queue_type="ucast")
+        switch.create_qos_map.assert_any_call(queues=[0], tc_name="QMU_200", queue_type="mcast")
+
+    def test_set_port_bw_by_tc_userspace_default_suffix(self, switch, mocker):
+        """Test set_port_bw_by_tc_userspace with default suffix."""
+        # Arrange
+        port = "eth1/1/1"
+        switch._connection = mocker.Mock()
+        switch._validate_configure_parameters = mocker.Mock()
+        switch._port_range = mocker.Mock(return_value="")
+        switch._convert_port_name = mocker.Mock(return_value="ethernet1/1/1")
+
+        # Act
+        switch.set_port_bw_by_tc_userspace(port)
+
+        # Assert
+        switch._validate_configure_parameters.assert_called_once_with(ports=port)
+        expected_commands = [
+            "interface ethernet1/1/1",
+            "trust-map dot1p TM_100",
+            "qos-map traffic-class QMU_100",
+            "service-policy output type queuing PMU_100",
+            "service-policy input type network-qos PMQU_100",
+        ]
+        switch._connection.send_configuration.assert_called_once_with(expected_commands)
+
+    def test_set_port_bw_by_tc_userspace_custom_suffix(self, switch, mocker):
+        """Test set_port_bw_by_tc_userspace with custom suffix."""
+        # Arrange
+        port = "eth1/1/2"
+        suffix = "250"
+        switch._connection = mocker.Mock()
+        switch._validate_configure_parameters = mocker.Mock()
+        switch._port_range = mocker.Mock(return_value="range ")
+        switch._convert_port_name = mocker.Mock(return_value="ethernet1/1/2-1/1/3")
+
+        # Act
+        switch.set_port_bw_by_tc_userspace(port, suffix=suffix)
+
+        # Assert
+        switch._validate_configure_parameters.assert_called_once_with(ports=port)
+        expected_commands = [
+            "interface range ethernet1/1/2-1/1/3",
+            "trust-map dot1p TM_250",
+            "qos-map traffic-class QMU_250",
+            "service-policy output type queuing PMU_250",
+            "service-policy input type network-qos PMQU_250",
+        ]
+        switch._connection.send_configuration.assert_called_once_with(expected_commands)
+
+    def test_set_port_bw_by_tc_userspace_invalid_port(self, switch, mocker):
+        """Test set_port_bw_by_tc_userspace with invalid port."""
+        # Arrange
+        port = "invalid_port"
+        switch._validate_configure_parameters = mocker.Mock(side_effect=ValueError("Invalid port"))
+        switch._connection = mocker.Mock()
+
+        # Act & Assert
+        with raises(ValueError, match="Invalid port"):
+            switch.set_port_bw_by_tc_userspace(port)
+        switch._connection.send_configuration.assert_not_called()
+
+    def test_configure_pfc_ndk(self, switch, mocker):
+        """Test configure_pfc_ndk configuration."""
+        # Arrange
+        port = "eth1/1/1"
+        switch.create_qos_policy = mocker.Mock()
+        switch.set_port_bw_by_tc = mocker.Mock()
+        switch.set_port_pfc_by_tc = mocker.Mock()
+        switch.set_port_dcbx_version = mocker.Mock()
+
+        # Act
+        switch.configure_pfc_ndk(port)
+
+        # Assert
+        switch.create_qos_policy.assert_called_once_with([90, 10, 0, 0, 0, 0, 0, 0], [0, 0, 0, 1, 0, 0, 0, 0], "100")
+        switch.set_port_bw_by_tc.assert_called_once_with(port, suffix="100")
+        switch.set_port_pfc_by_tc.assert_called_once_with(port, qos_priority=None, pfc="on")
+        switch.set_port_dcbx_version.assert_called_once_with(port, mode="ieee")
+
+    def test_configure_pfc_userspace(self, switch, mocker):
+        """Test configure_pfc_userspace configuration."""
+        # Arrange
+        port = "eth1/1/2"
+        switch.create_qos_policy_userspace = mocker.Mock()
+        switch.create_qos_class_map = mocker.Mock()
+        switch.create_qos_queuing_policy_map = mocker.Mock()
+        switch.create_network_qos_policy_map = mocker.Mock()
+        switch.set_port_bw_by_tc_userspace = mocker.Mock()
+        switch.set_port_pfc_by_tc = mocker.Mock()
+        switch.set_port_dcbx_version = mocker.Mock()
+
+        # Act
+        switch.configure_pfc_userspace(port)
+
+        # Assert
+        switch.create_qos_policy_userspace.assert_called_once_with(suffix="100")
+        switch.create_qos_class_map.assert_any_call(name="Q0U_100", priority="0", class_type="queuing")
+        switch.create_qos_queuing_policy_map.assert_called_once_with(
+            name="PMU_100", class_bandwidth_dict={"Q0U_100": 100}
+        )
+        switch.create_qos_class_map.assert_any_call(name="CMQU_100", priority="3", class_type="network-qos")
+        switch.create_network_qos_policy_map.assert_called_once_with(
+            name="PMQU_100", class_names=["CMQU_100"], cos_values=["3"]
+        )
+        switch.set_port_bw_by_tc_userspace.assert_called_once_with(port, suffix="100")
+        switch.set_port_pfc_by_tc.assert_called_once_with(port, qos_priority=None, pfc="on")
+        switch.set_port_dcbx_version.assert_called_once_with(port, mode="ieee")
+
+    def test_delete_qos_policy_userspace_default_suffix(self, switch, mocker):
+        """Test delete_qos_policy_userspace with default suffix."""
+        # Arrange
+        switch._connection = mocker.Mock()
+
+        # Act
+        switch.delete_qos_policy_userspace()
+
+        # Assert
+        expected_commands = [
+            "no policy-map type queuing PMU_100",
+            "no class-map type queuing Q0U_100",
+            "no qos-map traffic-class QMU_100",
+            "no trust dot1p-map TM_100",
+            "no policy-map type network-qos PMQU_100",
+            "no class-map type network-qos CMQU_100",
+        ]
+        switch._connection.send_configuration.assert_called_once_with(expected_commands)
+
+    def test_delete_qos_policy_userspace_custom_suffix(self, switch, mocker):
+        """Test delete_qos_policy_userspace with custom suffix."""
+        # Arrange
+        switch._connection = mocker.Mock()
+        suffix = "300"
+
+        # Act
+        switch.delete_qos_policy_userspace(suffix=suffix)
+
+        # Assert
+        expected_commands = [
+            "no policy-map type queuing PMU_300",
+            "no class-map type queuing Q0U_300",
+            "no qos-map traffic-class QMU_300",
+            "no trust dot1p-map TM_300",
+            "no policy-map type network-qos PMQU_300",
+            "no class-map type network-qos CMQU_300",
+        ]
+        switch._connection.send_configuration.assert_called_once_with(expected_commands)
+
+    def test_disable_pfc_ndk_type(self, switch, mocker):
+        """Test disable_pfc with NDK type (default)."""
+        # Arrange
+        port = "eth1/1/1"
+        switch._validate_port_and_port_channel_syntax = mocker.Mock()
+        switch.delete_port_bw_by_tc = mocker.Mock()
+        switch.delete_port_pfc = mocker.Mock()
+        switch.clear_port_dcbx = mocker.Mock()
+        switch.delete_qos_policy = mocker.Mock()
+        switch._connection = mocker.Mock()
+
+        # Act
+        switch.disable_pfc(port)
+
+        # Assert
+        switch._validate_port_and_port_channel_syntax.assert_called_once_with(ethernet_port=port)
+        switch.delete_port_bw_by_tc.assert_called_once_with(port, suffix="100")
+        switch.delete_port_pfc.assert_called_once_with(port)
+        switch.clear_port_dcbx.assert_called_once_with(port)
+        switch.delete_qos_policy.assert_called_once_with(suffix="100")
+        switch._connection.send_configuration.assert_called_once_with([f"default interface {port}"])
+
+    def test_disable_pfc_userspace_type(self, switch, mocker):
+        """Test disable_pfc with userspace type."""
+        # Arrange
+        port = "eth1/1/2"
+        switch._validate_port_and_port_channel_syntax = mocker.Mock()
+        switch.delete_port_bw_by_tc = mocker.Mock()
+        switch.delete_port_pfc = mocker.Mock()
+        switch.clear_port_dcbx = mocker.Mock()
+        switch.delete_qos_policy_userspace = mocker.Mock()
+        switch._connection = mocker.Mock()
+
+        # Act
+        switch.disable_pfc(port, pfc_type="userspace")
+
+        # Assert
+        switch._validate_port_and_port_channel_syntax.assert_called_once_with(ethernet_port=port)
+        switch.delete_port_bw_by_tc.assert_called_once_with(port, suffix="100")
+        switch.delete_port_pfc.assert_called_once_with(port)
+        switch.clear_port_dcbx.assert_called_once_with(port)
+        switch.delete_qos_policy_userspace.assert_called_once_with(suffix="100")
+        switch._connection.send_configuration.assert_called_once_with([f"default interface {port}"])
+
+    def test_disable_pfc_custom_suffix(self, switch, mocker):
+        """Test disable_pfc with custom suffix."""
+        # Arrange
+        port = "eth1/1/3"
+        suffix = "200"
+        switch._validate_port_and_port_channel_syntax = mocker.Mock()
+        switch.delete_port_bw_by_tc = mocker.Mock()
+        switch.delete_port_pfc = mocker.Mock()
+        switch.clear_port_dcbx = mocker.Mock()
+        switch.delete_qos_policy = mocker.Mock()
+        switch._connection = mocker.Mock()
+
+        # Act
+        switch.disable_pfc(port, suffix=suffix)
+
+        # Assert
+        switch.delete_port_bw_by_tc.assert_called_once_with(port, suffix="200")
+        switch.delete_qos_policy.assert_called_once_with(suffix="200")
+
+    def test_disable_pfc_invalid_port(self, switch, mocker):
+        """Test disable_pfc with invalid port."""
+        # Arrange
+        port = "invalid_port"
+        switch._validate_port_and_port_channel_syntax = mocker.Mock(side_effect=ValueError("Invalid port format"))
+
+        # Act & Assert
+        with raises(ValueError, match="Invalid port format"):
+            switch.disable_pfc(port)

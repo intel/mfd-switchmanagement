@@ -981,3 +981,112 @@ class DellOS10(DellOS9):
                     f"lldp {param}",
                 ]
             )
+
+    def create_qos_policy_userspace(self, suffix: str = "100") -> None:
+        """
+        Create QOS policy for userspace traffic.
+
+        Set all traffic to traffic class 0 and qos group 3.
+        :param suffix: suffix to use in names
+        """
+        trust_commands = [f"trust dot1p-map TM_{suffix}"]
+        priority = 8
+        cos_value = ",".join([str(qos_prio) for qos_prio in range(priority)])
+
+        trust_commands.append(f"qos-group 3 dot1p {cos_value}")
+        trust_commands.append("exit")
+
+        self._connection.send_configuration(trust_commands)
+        self.create_qos_map(queues=[0], tc_name=f"QMU_{suffix}", queue_type="ucast")
+        self.create_qos_map(queues=[0], tc_name=f"QMU_{suffix}", queue_type="mcast")
+
+    def set_port_bw_by_tc_userspace(self, port: str, suffix: str = "100") -> None:
+        """
+        Set the bandwidth of traffic class on a selected port.
+
+        Same as set_port_bw_by_tc but with changed suffix.
+
+        :param port: switch port
+        :param suffix: suffix for names
+        """
+        self._validate_configure_parameters(ports=port)
+        prange = self._port_range(port)
+
+        configuration = [
+            f"interface {prange}{self._convert_port_name(port)}",
+            f"trust-map dot1p TM_{suffix}",
+            f"qos-map traffic-class QMU_{suffix}",
+            f"service-policy output type queuing PMU_{suffix}",
+            f"service-policy input type network-qos PMQU_{suffix}",
+        ]
+        self._connection.send_configuration(configuration)
+
+    def configure_pfc_ndk(self, port: str) -> None:
+        """
+        Set default ndk Priority Flow Control (PFC) settings on the interface.
+
+        :param port: port of switch
+        """
+        self.create_qos_policy([90, 10, 0, 0, 0, 0, 0, 0], [0, 0, 0, 1, 0, 0, 0, 0], "100")
+        self.set_port_bw_by_tc(port, suffix="100")
+        self.set_port_pfc_by_tc(port, qos_priority=None, pfc="on")
+        self.set_port_dcbx_version(port, mode="ieee")
+
+    def configure_pfc_userspace(self, port: str) -> None:
+        """
+        Set default userspace Priority Flow Control (PFC) settings on the interface.
+
+        :param port: port of switch
+        """
+        self.create_qos_policy_userspace(suffix="100")
+        self.create_qos_class_map(name="Q0U_100", priority="0", class_type="queuing")
+        self.create_qos_queuing_policy_map(name="PMU_100", class_bandwidth_dict={"Q0U_100": 100})
+        self.create_qos_class_map(name="CMQU_100", priority="3", class_type="network-qos")
+        self.create_network_qos_policy_map(name="PMQU_100", class_names=["CMQU_100"], cos_values=["3"])
+        self.set_port_bw_by_tc_userspace(port, suffix="100")
+        self.set_port_pfc_by_tc(port, qos_priority=None, pfc="on")
+        self.set_port_dcbx_version(port, mode="ieee")
+
+    def delete_qos_policy_userspace(self, suffix: str = "100") -> None:
+        """
+        Delete the userspace QoS policy.
+
+        :param suffix: suffix used in names
+        """
+        configuration = [
+            f"no policy-map type queuing PMU_{suffix}",
+            f"no class-map type queuing Q0U_{suffix}",
+            f"no qos-map traffic-class QMU_{suffix}",
+            f"no trust dot1p-map TM_{suffix}",
+            f"no policy-map type network-qos PMQU_{suffix}",
+            f"no class-map type network-qos CMQU_{suffix}",
+        ]
+        self._connection.send_configuration(configuration)
+
+    def disable_pfc(self, port: str, suffix: str = "100", pfc_type: str = "ndk") -> None:
+        """
+        Disable Priority Flow Control (PFC) settings on the interface.
+
+        :param port: port of switch
+        :param suffix: suffix used in QoS policy names (default: "100")
+        :param pfc_type: type of PFC configuration - "ndk" or "userspace" (default: "ndk")
+        """
+        logger.log(level=log_levels.MODULE_DEBUG, msg=f"Disabling {pfc_type} PFC on port: {port}")
+        self._validate_port_and_port_channel_syntax(ethernet_port=port)
+
+        # Remove port-specific configurations
+        self.delete_port_bw_by_tc(port, suffix=suffix)
+        self.delete_port_pfc(port)
+        self.clear_port_dcbx(port)
+
+        # Delete global QoS policies based on type
+        if pfc_type == "userspace":
+            self.delete_qos_policy_userspace(suffix=suffix)
+        else:
+            self.delete_qos_policy(suffix=suffix)
+
+        # Reset interface to defaults
+        commands = [
+            f"default interface {port}",
+        ]
+        self._connection.send_configuration(commands)
