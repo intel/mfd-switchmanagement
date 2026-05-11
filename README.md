@@ -6,7 +6,7 @@ Module for handling operations on switches from different vendors (for example I
 
 ___
 ## Parameters
- `ip: str` - IP Address of switch
+ `ip: str` - IP Address of switch.
 
  `username: str ` - Username for connection with switch
 
