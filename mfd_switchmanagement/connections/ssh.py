@@ -33,6 +33,7 @@ class SSHSwitchConnection(BaseSwitchConnection):
         super().__init__(*args, **kwargs)
         self._use_ssh_key: bool = kwargs.get("use_ssh_key", False)
         self._ssh_key_file: Union[str, "Path"] = kwargs.get("ssh_key_file", "")
+        self._resolved_device_type: Optional[str] = self._device_type
         self._connection = self.connect()
 
     def connect(self) -> Netmiko:
@@ -66,6 +67,8 @@ class SSHSwitchConnection(BaseSwitchConnection):
                     raise SwitchException("Detected not supported OS Switch, contact with developers of module")
                 else:
                     logger.log(level=log_levels.MODULE_DEBUG, msg=f'Detected "{best_match}" switch type.')
+            # Store the final resolved device type (either explicit or auto-detected)
+            self._resolved_device_type = str(switch["device_type"])
             # to properly identify prompt on slower switches we're temporally increasing delay
             connection = Netmiko(**switch, global_delay_factor=delay)
             # if user did not provide delay, let's restore Netmiko default after setup
@@ -91,13 +94,25 @@ class SSHSwitchConnection(BaseSwitchConnection):
 
     def _check_connection(self) -> Optional[bool]:
         """Check connection to switch."""
-        connection_status = (
-            self._connection.remote_conn.transport.is_alive()
-        )  # check if transport layer of channel of connection is active
+        connection_status = bool(self._connection.is_alive())
+
+        # Fallback to Paramiko transport for Arista when Netmiko reports False
+        if not connection_status and self._is_arista_device_type():
+            remote_conn = getattr(self._connection, "remote_conn", None)
+            if remote_conn:
+                transport = getattr(remote_conn, "transport", None)
+                if transport and callable(getattr(transport, "is_alive", None)):
+                    connection_status = bool(transport.is_alive())
+
         if connection_status:
             logger.log(level=log_levels.MODULE_DEBUG, msg="Connection established.")
-            return connection_status
+            return True
         logger.log(level=log_levels.MODULE_DEBUG, msg="Connection not established.")
+
+    def _is_arista_device_type(self) -> bool:
+        """Determine whether connected switch uses Arista Netmiko driver."""
+        device_type = (self._resolved_device_type or self._device_type or "").lower()
+        return "arista" in device_type
 
     @property
     def _remote(self) -> Netmiko:
