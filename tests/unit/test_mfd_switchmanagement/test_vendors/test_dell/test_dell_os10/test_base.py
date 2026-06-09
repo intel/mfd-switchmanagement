@@ -1225,7 +1225,7 @@ class TestDellOS10:
         switch.configure_pfc_ndk(port)
 
         # Assert
-        switch.create_qos_policy.assert_called_once_with([90, 10, 0, 0, 0, 0, 0, 0], [0, 0, 0, 1, 0, 0, 0, 0], "100")
+        switch.create_qos_policy.assert_called_once_with([50, 50, 0, 0, 0, 0, 0, 0], [0, 0, 0, 1, 0, 0, 0, 0], "100")
         switch.set_port_bw_by_tc.assert_called_once_with(port, suffix="100")
         switch.set_port_pfc_by_tc.assert_called_once_with(port, qos_priority=None, pfc="on")
         switch.set_port_dcbx_version.assert_called_once_with(port, mode="ieee")

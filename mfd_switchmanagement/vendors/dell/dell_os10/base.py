@@ -1027,7 +1027,7 @@ class DellOS10(DellOS9):
 
         :param port: port of switch
         """
-        self.create_qos_policy([90, 10, 0, 0, 0, 0, 0, 0], [0, 0, 0, 1, 0, 0, 0, 0], "100")
+        self.create_qos_policy([50, 50, 0, 0, 0, 0, 0, 0], [0, 0, 0, 1, 0, 0, 0, 0], "100")
         self.set_port_bw_by_tc(port, suffix="100")
         self.set_port_pfc_by_tc(port, qos_priority=None, pfc="on")
         self.set_port_dcbx_version(port, mode="ieee")
