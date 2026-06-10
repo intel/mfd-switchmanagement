@@ -62,18 +62,50 @@ class TestSSHSwitchConnection:
         log_debug.assert_called_once_with(level=log_levels.MODULE_DEBUG, msg="Connection not established.")
         assert return_value == expected_value
 
-    def test__check_connection_arista_transport_fallback(self, ssh_connection, mocker):
+    def test__check_connection_arista_uses_transport_and_skips_is_alive(self, ssh_connection, mocker):
         log_debug = mocker.patch("mfd_switchmanagement.connections.ssh.logger.log")
         ssh_connection._resolved_device_type = "arista_eos"
-        ssh_connection._connection.is_alive = mocker.Mock(return_value=False)
+        ssh_connection._connection.is_alive = mocker.Mock(return_value=True)
         ssh_connection._connection.remote_conn = mocker.Mock()
         ssh_connection._connection.remote_conn.transport = mocker.Mock()
-        ssh_connection._connection.remote_conn.transport.is_alive = mocker.Mock(return_value=True)
+        ssh_connection._connection.remote_conn.transport.is_active = mocker.Mock(return_value=True)
 
         return_value = ssh_connection._check_connection()
 
+        # is_alive() must NOT be used for Arista: it writes a NULL byte that corrupts find_prompt().
+        ssh_connection._connection.is_alive.assert_not_called()
+        ssh_connection._connection.remote_conn.transport.is_active.assert_called_once()
         log_debug.assert_called_once_with(level=log_levels.MODULE_DEBUG, msg="Connection established.")
         assert return_value is True
+
+    def test__check_connection_arista_transport_inactive(self, ssh_connection, mocker):
+        log_debug = mocker.patch("mfd_switchmanagement.connections.ssh.logger.log")
+        ssh_connection._resolved_device_type = "arista_eos"
+        ssh_connection._connection.is_alive = mocker.Mock(return_value=True)
+        ssh_connection._connection.remote_conn = mocker.Mock()
+        ssh_connection._connection.remote_conn.transport = mocker.Mock()
+        ssh_connection._connection.remote_conn.transport.is_active = mocker.Mock(return_value=False)
+
+        return_value = ssh_connection._check_connection()
+
+        ssh_connection._connection.is_alive.assert_not_called()
+        ssh_connection._connection.remote_conn.transport.is_active.assert_called_once()
+        log_debug.assert_called_once_with(level=log_levels.MODULE_DEBUG, msg="Connection not established.")
+        assert return_value is None
+
+    def test__check_connection_arista_transport_without_is_active(self, ssh_connection, mocker):
+        log_debug = mocker.patch("mfd_switchmanagement.connections.ssh.logger.log")
+        ssh_connection._resolved_device_type = "arista_eos"
+        ssh_connection._connection.is_alive = mocker.Mock(return_value=True)
+        ssh_connection._connection.remote_conn = mocker.Mock()
+        # transport lacks a callable is_active -> must be treated as not established, not raise
+        ssh_connection._connection.remote_conn.transport = object()
+
+        return_value = ssh_connection._check_connection()
+
+        ssh_connection._connection.is_alive.assert_not_called()
+        log_debug.assert_called_once_with(level=log_levels.MODULE_DEBUG, msg="Connection not established.")
+        assert return_value is None
 
     def test__check_connection_non_arista_does_not_use_transport_fallback(self, ssh_connection, mocker):
         log_debug = mocker.patch("mfd_switchmanagement.connections.ssh.logger.log")
@@ -88,8 +120,8 @@ class TestSSHSwitchConnection:
         log_debug.assert_called_once_with(level=log_levels.MODULE_DEBUG, msg="Connection not established.")
         assert return_value is None
 
-    def test__check_connection_arista_autodetect_fallback(self, mocker):
-        """Test that Arista fallback activates after autodetect."""
+    def test__check_connection_arista_autodetect_uses_transport_state(self, mocker):
+        """Test that Arista uses the transport state (not is_alive) after autodetect."""
         mocker.patch("mfd_switchmanagement.connections.ssh.SSHSwitchConnection.connect")
 
         params = {
@@ -107,16 +139,16 @@ class TestSSHSwitchConnection:
         ssh_connection._resolved_device_type = "arista_eos"
 
         log_debug = mocker.patch("mfd_switchmanagement.connections.ssh.logger.log")
-        # Netmiko.is_alive() returns False (Arista quirk)
-        ssh_connection._connection.is_alive = mocker.Mock(return_value=False)
-        # But Paramiko transport is alive
+        ssh_connection._connection.is_alive = mocker.Mock(return_value=True)
+        # Paramiko transport is active
         ssh_connection._connection.remote_conn = mocker.Mock()
         ssh_connection._connection.remote_conn.transport = mocker.Mock()
-        ssh_connection._connection.remote_conn.transport.is_alive = mocker.Mock(return_value=True)
+        ssh_connection._connection.remote_conn.transport.is_active = mocker.Mock(return_value=True)
 
         return_value = ssh_connection._check_connection()
 
-        # Should detect "Connection established" via transport fallback
+        # Should detect "Connection established" via transport state, without calling is_alive()
+        ssh_connection._connection.is_alive.assert_not_called()
         log_debug.assert_called_once_with(level=log_levels.MODULE_DEBUG, msg="Connection established.")
         assert return_value is True
 
@@ -223,3 +255,33 @@ class TestSSHSwitchConnection:
         ssh_connection._connection.send_config_set.assert_called_once_with(
             commands, exit_config_mode=True, enter_config_mode=True, cmd_verify=False
         )
+
+    def test_send_command(self, ssh_connection, mocker):
+        ssh_connection._check_connection = mocker.Mock(return_value=True)
+        ssh_connection._connection.send_command = mocker.Mock(return_value="output")
+
+        assert ssh_connection.send_command("show version") == "output"
+
+        ssh_connection._connection.send_command.assert_called_once_with("show version")
+        ssh_connection._check_connection.assert_called_once()
+
+    def test_send_command_expect(self, ssh_connection, mocker):
+        ssh_connection._check_connection = mocker.Mock(return_value=True)
+        ssh_connection._connection.send_command = mocker.Mock(return_value="output")
+
+        assert ssh_connection.send_command_expect("reload", "confirm") == "output"
+
+        ssh_connection._connection.send_command.assert_called_once_with("reload", expect_string="confirm")
+        ssh_connection._check_connection.assert_called_once()
+
+    def test_send_command_list(self, ssh_connection, mocker):
+        ssh_connection._check_connection = mocker.Mock(return_value=True)
+        ssh_connection._connection.send_config_set = mocker.Mock(return_value="output")
+        commands = ["interface ethernet1/1/1", "no shutdown"]
+
+        assert ssh_connection.send_command_list(commands) == "output"
+
+        ssh_connection._connection.send_config_set.assert_called_once_with(
+            commands, exit_config_mode=False, enter_config_mode=False
+        )
+        ssh_connection._check_connection.assert_called_once()

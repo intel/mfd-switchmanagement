@@ -94,15 +94,16 @@ class SSHSwitchConnection(BaseSwitchConnection):
 
     def _check_connection(self) -> Optional[bool]:
         """Check connection to switch."""
-        connection_status = bool(self._connection.is_alive())
-
-        # Fallback to Paramiko transport for Arista when Netmiko reports False
-        if not connection_status and self._is_arista_device_type():
+        if self._is_arista_device_type():
+            # Avoid netmiko is_alive(): on SSH it writes a NULL byte into the channel,
+            # which corrupts the next find_prompt() and causes spurious ReadTimeout on
+            # subsequent 'show' commands. Check the Paramiko transport state directly.
             remote_conn = getattr(self._connection, "remote_conn", None)
-            if remote_conn:
-                transport = getattr(remote_conn, "transport", None)
-                if transport and callable(getattr(transport, "is_alive", None)):
-                    connection_status = bool(transport.is_alive())
+            transport = getattr(remote_conn, "transport", None)
+            is_active = getattr(transport, "is_active", None)
+            connection_status = bool(is_active()) if callable(is_active) else False
+        else:
+            connection_status = bool(self._connection.is_alive())
 
         if connection_status:
             logger.log(level=log_levels.MODULE_DEBUG, msg="Connection established.")
