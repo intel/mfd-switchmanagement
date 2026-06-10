@@ -1318,7 +1318,9 @@ class TestDellOS10:
         switch.delete_port_pfc.assert_called_once_with(port)
         switch.clear_port_dcbx.assert_called_once_with(port)
         switch.delete_qos_policy.assert_called_once_with(suffix="100")
-        switch._connection.send_configuration.assert_called_once_with([f"default interface {port}"])
+        switch._connection.send_configuration.assert_called_once_with(
+            [f"default interface {port}", "yes"], cmd_verify=False
+        )
 
     def test_disable_pfc_userspace_type(self, switch, mocker):
         """Test disable_pfc with userspace type."""
@@ -1340,7 +1342,9 @@ class TestDellOS10:
         switch.delete_port_pfc.assert_called_once_with(port)
         switch.clear_port_dcbx.assert_called_once_with(port)
         switch.delete_qos_policy_userspace.assert_called_once_with(suffix="100")
-        switch._connection.send_configuration.assert_called_once_with([f"default interface {port}"])
+        switch._connection.send_configuration.assert_called_once_with(
+            [f"default interface {port}", "yes"], cmd_verify=False
+        )
 
     def test_disable_pfc_custom_suffix(self, switch, mocker):
         """Test disable_pfc with custom suffix."""

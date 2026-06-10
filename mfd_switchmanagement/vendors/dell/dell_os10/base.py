@@ -1085,8 +1085,15 @@ class DellOS10(DellOS9):
         else:
             self.delete_qos_policy(suffix=suffix)
 
-        # Reset interface to defaults
+        # Reset interface to defaults.
+        # Dell OS10 responds to "default interface <port>" with an interactive prompt:
+        # "Proceed to cleanup the interface config? [confirm yes/no]:"
+        # cmd_verify=False disables per-command echo verification, so the command is
+        # sent without waiting for its echo to be matched before proceeding.
+        # "yes" is appended as the interactive confirmation response; it is sent as
+        # a separate command and consumed by the device when the prompt appears.
         commands = [
             f"default interface {port}",
+            "yes",  # confirm "Proceed to cleanup the interface config? [confirm yes/no]:"
         ]
-        self._connection.send_configuration(commands)
+        self._connection.send_configuration(commands, cmd_verify=False)
