@@ -164,17 +164,24 @@ class SSHSwitchConnection(BaseSwitchConnection):
         logger.log(level=log_levels.OUT, msg=output)
         return output
 
-    def send_configuration(self, commands: List[str]) -> str:
+    def send_configuration(self, commands: List[str], cmd_verify: bool = True) -> str:
         """
         Send commands list via connection as configuration.
 
-        Enter configuration mode, send commands, exit configuration mode
+        Enter configuration mode, send commands, exit configuration mode.
 
         :param commands: commands for send
+        :param cmd_verify: when False, commands are written to the channel without
+            waiting for echo verification between each one.  Use cmd_verify=False
+            together with an explicit confirmation response (e.g. 'yes') appended
+            to *commands* when a command triggers an interactive prompt such as
+            Dell OS10's "Proceed to cleanup the interface config? [confirm yes/no]:"
         :return: Output from commands
         """
         logger.log(level=log_levels.CMD, msg=f"Executing configuration: '{commands}'")
-        output = self._remote.send_config_set(commands, exit_config_mode=True, enter_config_mode=True)
+        output = self._remote.send_config_set(
+            commands, exit_config_mode=True, enter_config_mode=True, cmd_verify=cmd_verify
+        )
         logger.log(level=log_levels.OUT, msg=output)
         return output
 

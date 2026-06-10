@@ -194,3 +194,32 @@ class TestSSHSwitchConnection:
         ssh_connection._connection.exit_config_mode = mocker.Mock()
         ssh_connection.exit_port_configuration()
         ssh_connection._connection.exit_config_mode.assert_called_once()
+
+    def test_send_configuration_default_cmd_verify(self, ssh_connection, mocker):
+        """send_configuration with default cmd_verify=True passes cmd_verify=True to send_config_set."""
+        ssh_connection._check_connection = mocker.Mock(return_value=True)
+        ssh_connection._connection.send_config_set = mocker.Mock(return_value="")
+        commands = ["interface ethernet1/1/1", "no shutdown"]
+
+        ssh_connection.send_configuration(commands)
+
+        ssh_connection._connection.send_config_set.assert_called_once_with(
+            commands, exit_config_mode=True, enter_config_mode=True, cmd_verify=True
+        )
+
+    def test_send_configuration_cmd_verify_false(self, ssh_connection, mocker):
+        """send_configuration with cmd_verify=False passes cmd_verify=False to send_config_set.
+
+        This is used for interactive commands (e.g. 'default interface <port>') that
+        produce a confirmation prompt; the confirmation response is appended to commands
+        and consumed by the device without per-command echo verification.
+        """
+        ssh_connection._check_connection = mocker.Mock(return_value=True)
+        ssh_connection._connection.send_config_set = mocker.Mock(return_value="")
+        commands = ["default interface ethernet1/1/1", "yes"]
+
+        ssh_connection.send_configuration(commands, cmd_verify=False)
+
+        ssh_connection._connection.send_config_set.assert_called_once_with(
+            commands, exit_config_mode=True, enter_config_mode=True, cmd_verify=False
+        )
