@@ -2,6 +2,17 @@
 
 <!-- version list -->
 
+## v2.20.1 (2026-11-10)
+
+### Bug Fixes
+
+- Handle interactive confirmation prompt in disable_pfc
+  ([`73e6361`](https://github.com/intel/mfd-switchmanagement/commit/73e636159d2b45a09549b83e9247adb23d82ebbd))
+
+- Prevent Arista ReadTimeout by skipping is_alive() NULL-byte probe
+  ([`da66cdd`](https://github.com/intel/mfd-switchmanagement/commit/da66cdd2c633cbfc9b641cef64fbf9d46439f8ad))
+
+
 ## v2.20.0 (2026-06-10)
 
 ### Bug Fixes
